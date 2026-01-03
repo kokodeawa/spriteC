@@ -1,0 +1,5 @@
+{
+  "name": "SpriteForge V1",
+  "description": "Generador universal de sprites 16-bit para desarrollo de videojuegos en hardware embebido.",
+  "requestFramePermissions": []
+}
