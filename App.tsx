@@ -1,5 +1,4 @@
 
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { generateGameAsset } from './services/gemini';
 import { convertToCArray, cArrayToImage, CArrayResult as CArrayFullResult } from './utils/imageToC';
@@ -17,18 +16,19 @@ interface Frame {
   prompt: string;
 }
 
-// Define the AIStudio interface as expected by TypeScript.
-// This resolves the error: "Property 'aistudio' must be of type 'AIStudio', but here has type '{ ... }'".
-interface AIStudio {
-  hasSelectedApiKey: () => Promise<boolean>;
-  openSelectKey: () => Promise<void>;
-}
+// The following AIStudio interface and declare global block are being removed
+// as the error message indicates a duplicate declaration of 'aistudio' on 'window'.
+// It is assumed that `window.aistudio` is already correctly declared elsewhere in the project.
+// interface AIStudio {
+//   hasSelectedApiKey: () => Promise<boolean>;
+//   openSelectKey: () => Promise<void>;
+// }
 
-declare global {
-  interface Window {
-    aistudio: AIStudio;
-  }
-}
+// declare global {
+//   interface Window {
+//     aistudio: AIStudio;
+//   }
+// }
 
 const App: React.FC = () => {
   const [prompt, setPrompt] = useState('pocion de curación estilo pixel art');
@@ -62,19 +62,26 @@ const App: React.FC = () => {
   }, [isPlaying, frames.length]);
 
   const checkApiKeyStatus = useCallback(async () => {
-    if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
-      const selected = await window.aistudio.hasSelectedApiKey();
+    const aistudio = (window as any).aistudio;
+
+    if (aistudio && typeof aistudio.hasSelectedApiKey === 'function' && typeof aistudio.openSelectKey === 'function') {
+      // Running in an AI Studio environment
+      const selected = await aistudio.hasSelectedApiKey();
       setHasUserSelectedApiKey(selected);
-      if (!selected && !apiError) { // Only set generic error if no specific API error is already present
+      if (!selected && !apiError) {
         setApiError("Please select a paid API key to use advanced features and avoid quota limits. (ai.google.dev/gemini-api/docs/billing)");
       } else if (selected && apiError === "Please select a paid API key to use advanced features and avoid quota limits. (ai.google.dev/gemini-api/docs/billing)") {
-        // Clear generic key error if key is now selected
-        setApiError(null); 
+        setApiError(null); // Clear generic key error if key is now selected
       }
     } else {
-      // If aistudio is not available, assume key is managed externally or not needed for basic ops
-      setHasUserSelectedApiKey(true);
-      setApiError(null);
+      // Not running in an AI Studio environment, or `aistudio` object is incomplete.
+      // In this case, the `Select API Key` button cannot function.
+      setHasUserSelectedApiKey(false); 
+      // Only set this specific error if no other API error (e.g., quota) is already present,
+      // or if the existing error is the generic key selection prompt.
+      if (!apiError || apiError.includes("Please select a paid API key")) {
+          setApiError("AI Studio utilities (window.aistudio) are not available. The API key selection feature is disabled. Please ensure 'process.env.API_KEY' is configured if running outside AI Studio, or deploy within the AI Studio environment.");
+      }
     }
   }, [apiError]);
 
@@ -83,9 +90,10 @@ const App: React.FC = () => {
   }, [checkApiKeyStatus]);
 
   const handleSelectApiKey = async () => {
-    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+    // Cast window to any to access aistudio which is assumed to be globally declared elsewhere.
+    if ((window as any).aistudio && typeof (window as any).aistudio.openSelectKey === 'function') {
       try {
-        await window.aistudio.openSelectKey();
+        await (window as any).aistudio.openSelectKey();
         // Assume success after opening the dialog, as per guidelines
         setHasUserSelectedApiKey(true);
         setApiError(null); // Clear any previous API errors after successful selection
@@ -102,7 +110,11 @@ const App: React.FC = () => {
   const handleForge = async (isNextFrame: boolean = false) => {
     if (!prompt) return;
     if (!hasUserSelectedApiKey) {
-        setApiError("An API key is required to generate assets. Please select one.");
+        // This error should already be set by checkApiKeyStatus if aistudio is missing,
+        // or by a previous API call if quota was hit.
+        if (!apiError) { // Fallback in case apiError somehow got cleared but key isn't selected
+            setApiError("An API key is required to generate assets. Please select one.");
+        }
         return;
     }
 
@@ -334,7 +346,8 @@ const App: React.FC = () => {
       {apiError && (
         <div className="bg-red-900/20 border border-red-500/30 text-red-300 p-3 rounded-lg flex items-center justify-between text-sm shadow-md transition-all duration-300 ease-in-out transform scale-100 hover:scale-[1.01]">
           <span className="flex-1 mr-4">{apiError}</span>
-          {!hasUserSelectedApiKey && (
+          {/* Only render the "Select API Key" button if aistudio utilities are actually available AND a key hasn't been selected yet. */}
+          { (window as any).aistudio && typeof (window as any).aistudio.openSelectKey === 'function' && !hasUserSelectedApiKey && (
             <button
               onClick={handleSelectApiKey}
               className="bg-red-600 hover:bg-red-500 text-white font-bold py-1 px-3 rounded-md text-xs uppercase tracking-wider transition-colors shadow-sm"
@@ -538,7 +551,7 @@ const App: React.FC = () => {
                 {isDecoding && <div className="w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>}
                 {decodeError && <div className="text-center text-red-500 text-xs font-bold p-4 bg-red-900/20 border border-red-500/30 rounded"><p className="font-black uppercase mb-2">Decode Error</p>{decodeError}</div>}
                 {decodedImage && !isDecoding && !decodeError && <img src={decodedImage} alt="Decoded Asset" className="pixel-art w-full h-full object-contain" />}
-                {!decodedImage && !isDecoding && !decodeError && <div className="text-center text-slate-800 opacity-20"><svg className="mx-auto mb-2" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1"><path d="M10 21.5c.32.3.68.5.9.8.48.52 1.17 1.2 1.1 2.2 0 .8-.4 1.5-1.1 1.5-.7 0-1.1-.7-1.1-1.5 0-.9.4-1.5.8-2 .3-.4.6-.7.8-.9.4-.4.8-.8 1-1.1.2-.3.4-.6.5-.8.2-.3.4-.6.4-.9.2-.5.1-1-.1-1.5-.2-.4-.4-.8-.6-1.2l-.2-.5c-.2-.4-.3-.8-.3-1.2s.1-.8.2-1.2l-.2-.5c-.2-.4-.4-.8-.6-1.2-.2-.5-.3-1-.1-1.5s.2-.9.4-.9c-.1-.3-.3-.6-.5-.8-.2-.3-.6-.7-1-1.1-.2-.3-.5-.6-.8-.9-.4-.5-.8-1.1-.8-2 0-.8.4-1.5 1.1-1.5s1.1.7 1.1 1.5c-.07 1-.76 1.68-1.1 2.2-.2.3-.5.5-.9.8zm4 0c-.32.3-.68.5-.9.8-.48.52-1.17 1.2-1.1 2.2 0 .8.4 1.5 1.1 1.5.7 0 1.1-.7 1.1-1.5 0-.9-.4-1.5-.8-2-.3-.4-.6-.7-.8-.9-.4-.4-.8-.8-1-1.1-.2-.3-.4-.6-.5-.8-.2-.3-.4-.6-.4-.9-.2-.5-.1-1 .1-1.5.2-.4.4-.8.6-1.2l.2-.5c.2-.4.3-.8.3-1.2s-.1-.8-.2-1.2l-.2-.5c-.2-.4-.4-.8-.6-1.2-.2-.5-.3-1-.1-1.5s.2-.9.4-.9c-.1-.3-.3-.6-.5-.8-.2-.3-.6-.7 1-1.1.2-.3.5-.6.8-.9.4-.5.8-1.1.8-2 0-.8-.4-1.5-1.1-1.5s-1.1.7-1.1 1.5c.07 1 .76 1.68 1.1 2.2.2.3.5.5.9.8z"/></svg><span className="text-[12px] font-black uppercase tracking-[0.5em]">DECODER_IDLE</span></div>}
+                {!decodedImage && !isDecoding && !decodeError && <div className="text-center text-slate-800 opacity-20"><svg className="mx-auto mb-2" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1"><path d="M10 21.5c.32.3.68.5.9.8.48.52 1.17 1.2 1.1 2.2 0 .8-.4 1.5-1.1 1.5-.7 0-1.1-.7-1.1-1.5 0-.9.4-1.5.8-2 .3-.4.6-.7.8-.9.4-.4.8-.8 1-1.1.2-.3.4-.6.5-.8.2-.3.4-.6.4-.9.2-.5.1-1-.1-1.5-.2-.4-.4-.8-.6-1.2l-.2-.5c-.2-.4-.3-.8-.3-1.2s.1-.8.2-1.2l-.2-.5c-.2-.4-.4-.8-.6-1.2-.2-.5-.3-1-.1-1.5s.2-.9.4-.9c-.1-.3-.3-.6-.5-.8-.2-.3-.6-.7-1-1.1-.2-.3-.5-.6-.8-.9-.4-.5-.8-1.1-.8-2 0-.8.4-1.5 1.1-1.5s1.1.7 1.1 1.5c-.07 1-.76 1.68-1.1 2.2-.2.3-.5.5-.9.8zm4 0c-.32.3-.68.5-.9.8-.48.52-1.17 1.2-1.1 2.2 0 .8.4 1.5 1.1 1.5.7 0 1.1-.7 1.1-1.5 0-.9-.4-1.5-.8-2-.3-.4-.6-.7-.8-.9-.4-.4-.8-.8-1-1.1-.2-.3-.4-.6-.5-.8-.2-.3-.4-.6-.4-.9-.2-.5-.1-1 .1-1.5.2-.4.4-.8.6-1.2l-.2-.5c.2-.4.3-.8.3-1.2s-.1-.8-.2-1.2l-.2-.5c-.2-.4-.4-.8-.6-1.2-.2-.5-.3-1-.1-1.5s.2-.9.4-.9c-.1-.3-.3-.6-.5-.8-.2-.3-.6-.7 1-1.1.2-.3.5-.6.8-.9.4-.5.8-1.1.8-2 0-.8-.4-1.5-1.1-1.5s-1.1.7-1.1 1.5c.07 1 .76 1.68 1.1 2.2.2.3.5.5.9.8z"/></svg><span className="text-[12px] font-black uppercase tracking-[0.5em]">DECODER_IDLE</span></div>}
              </div>
           </div>
         </div>
